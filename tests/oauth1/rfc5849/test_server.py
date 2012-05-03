@@ -28,6 +28,9 @@ class ServerTests(TestCase):
         def check_timestamp_and_nonce(self, timestamp, nonce):
             return True
 
+        def check_realm(self, client_key, resource_owner_key, realm, uri):
+            return True
+
     def test_basic_server_request(self):
         c = Client(self.CLIENT_KEY,
             client_secret=self.CLIENT_SECRET,
@@ -38,8 +41,7 @@ class ServerTests(TestCase):
         uri, headers, body = c.sign(u'http://server.example.com:80/init')
 
         s = self.TestServer()
-        self.assertTrue(s.check_request_signature(uri, body=body,
-            headers=headers))
+        self.assertTrue(s.verify_request(uri, body=body, headers=headers))
 
     def test_server_callback_request(self):
         c = Client(self.CLIENT_KEY,
@@ -52,5 +54,4 @@ class ServerTests(TestCase):
         uri, headers, body = c.sign(u'http://server.example.com:80/init')
 
         s = self.TestServer()
-        self.assertTrue(s.check_request_signature(uri, body=body,
-            headers=headers))
+        self.assertTrue(s.verify_request(uri, body=body, headers=headers))

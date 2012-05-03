@@ -10,6 +10,7 @@ for signing and checking OAuth 1.0 RFC 5849 requests.
 """
 
 import logging
+import time
 import urlparse
 
 from oauthlib.common import Request, urlencode
@@ -214,26 +215,37 @@ class Client(object):
 
 class Server(object):
     """A server used to verify OAuth 1.0 RFC 5849 requests"""
-    def __init__(self, signature_method=SIGNATURE_HMAC, rsa_key=None):
-        self.signature_method = signature_method
-        self.rsa_key = rsa_key
+    def __init__(self):
+        pass
 
     def get_client_secret(self, client_key):
+        raise NotImplementedError("Subclasses must implement this function.")
+
+    def get_dummy_client(self):
         raise NotImplementedError("Subclasses must implement this function.")
 
     def get_resource_owner_secret(self, resource_owner_key):
         raise NotImplementedError("Subclasses must implement this function.")
 
-    def get_signature_type_and_params(self, uri_query, headers, body):
+    def get_dummy_resource_owner(self):
+        raise NotImplementedError("Subclasses must implement this function.")
+    
+    def get_rsa_key(self):
+        raise NotImplementedError("Subclasses must implement this function.")
+
+    def get_signature_type_and_params(self, request):
+        """Extracts parameters from query, headers and body. Signature type 
+        is set to the source in which parameters were found.
+        """
         signature_types_with_oauth_params = filter(lambda s: s[1], (
             (SIGNATURE_TYPE_AUTH_HEADER, utils.filter_oauth_params(
-                signature.collect_parameters(headers=headers,
+                signature.collect_parameters(headers=request.headers,
                 exclude_oauth_signature=False))),
             (SIGNATURE_TYPE_BODY, utils.filter_oauth_params(
-                signature.collect_parameters(body=body,
+                signature.collect_parameters(body=request.body,
                 exclude_oauth_signature=False))),
             (SIGNATURE_TYPE_QUERY, utils.filter_oauth_params(
-                signature.collect_parameters(uri_query=uri_query,
+                signature.collect_parameters(uri_query=request.uri_query,
                 exclude_oauth_signature=False))),
         ))
 
@@ -256,25 +268,48 @@ class Server(object):
     def check_timestamp_and_nonce(self, timestamp, nonce):
         raise NotImplementedError("Subclasses must implement this function.")
 
-    def check_request_signature(self, uri, http_method=u'GET', body='',
-            headers=None):
-        """Check a request's supplied signature to make sure the request is
-        valid.
+    def check_realm(self, client_key, resource_owner_key, realm, uri):
+        raise NotImplementedError("Subclasses must implement this function.")
 
-        Servers should return HTTP status 400 if a ValueError exception
-        is raised and HTTP status 401 on return value False.
+    def verify_request(self, uri, http_method=u'GET', body=None,
+            headers=None):
+        """Verifies a request ensuring that the following is true:
 
         Per `section 3.2`_ of the spec.
 
-        .. _`section 3.2`: http://tools.ietf.org/html/rfc5849#section-3.2
-        """
-        headers = headers or {}
-        signature_type = None
-        # FIXME: urlparse does not return unicode!
-        uri_query = urlparse.urlparse(uri).query
+        - all mandated OAuth parameters are supplied
+        - all parameters are validated 
+        - parameters are only supplied in one source which may be the URI
+          query, the Authorization header of the body
+        - all client identifiers are valid
+        - all tokens are valid
+        - nonces are only used once
+        - requests are not older than 10 minutes
+        - the signature is correct
+        
+        A ValueError will be raised if any parameter is missing,
+        supplied twice or invalid. A HTTP 400 Response should be returned
+        upon catching an exception. 
 
-        signature_type, params = self.get_signature_type_and_params(uri_query,
-            headers, body)
+        A HTTP 401 Response should be returned if verify_request returns False.
+
+        `Timing attacks`_ are prevented through the use of dummy accounts to
+        create near constant time verification even if an invalid consumer_key
+        is used. Early exit on invalid consumer_key would enable attackers
+        to perform client enumeration. Near constant time string comparison
+        is used to prevent secret key guessing. Note that timing attacks can
+        only be prevented through near constant time execution, not by adding
+        a random delay which would only require more samples to be gathered. 
+
+        For security details regarding these checks, please review the other
+        methods of this class. 
+
+        .. _`section 3.2`: http://tools.ietf.org/html/rfc5849#section-3.2
+        .. _`Timing attacks`: http://rdist.root.org/2010/07/19/exploiting-remote-timing-attacks/
+        """
+        request = Request(uri, http_method, body, headers)
+
+        signature_type, params = self.get_signature_type_and_params(request)
 
         # the parameters may not include duplicate oauth entries
         filtered_params = utils.filter_oauth_params(params)
@@ -291,43 +326,64 @@ class Server(object):
         verifier = params.get(u'oauth_verifier')
         signature_method = params.get(u'oauth_signature_method')
 
-        # ensure all mandatory parameters are present
+        # Ensure all mandatory parameters are present
         if not all((request_signature, client_key, nonce,
                     timestamp, signature_method)):
             raise ValueError("Missing OAuth parameters.")
 
-        # if version is supplied, it must be "1.0"
+        # If version is supplied, it must be "1.0"
         if u'oauth_version' in params and params[u'oauth_version'] != u'1.0':
             raise ValueError("Invalid OAuth version.")
 
-        # signature method must be valid
+
+
+        # Timestamps must be integers and not older than 10 minutes and
+        # have length 10 (for the next 200 years). 
+        if len(timestamp) != 10:
+            raise ValueError("Invalid timestamp size")
+        try:
+            ts = int(timestamp)
+            if time.time() - ts > 600:
+                raise ValueError("Request too old, over 10 minutes.")
+        
+        except ValueError:
+            raise ValueError("Timestamp must be an integer")
+
+        # Signature method must one of RSA-SHA1, HMAC-SHA1, PLAINTEXT
         if not signature_method in SIGNATURE_METHODS:
             raise ValueError("Invalid signature method.")
 
-        # ensure client key is valid
-        if not self.check_client_key(client_key):
-            return False
+        # Check if the client is valid and not expired
+        # If not assign a dummy client (see timing attacks above)
+        valid_client = self.check_client_key(client_key)
+        if not valid_client: 
+            client_key = self.get_dummy_client()
 
-        # ensure resource owner key is valid and not expired
-        if not self.check_resource_owner_key(client_key, resource_owner_key):
-            return False
+        # Check if resource owner key is valid and not expired
+        # If not assig a dummy resource owner (see timing attacks above)
+        valid_resource_owner = self.check_resource_owner_key(client_key, resource_owner_key)
+        if not valid_resource_owner:
+            resource_owner_key = self.get_dummy_resource_owner()
 
-        # ensure the nonce and timestamp haven't been used before
-        if not self.check_timestamp_and_nonce(timestamp, nonce):
-            return False
+        # Ensure the nonce and timestamp haven't been used before
+        valid_nonce = self.check_timestamp_and_nonce(timestamp, nonce)
 
-        # FIXME: extract realm, then self.check_realm
+        # Ensure client is authorized access
+        realm = params.get(u'realm')
+        valid_realm = self.check_realm(client_key, resource_owner_key,
+                                       realm, request.uri)
 
-        # oauth_client parameters depend on client chosen signature method
-        # which may vary for each request, section 3.4
-        # HMAC-SHA1 and PLAINTEXT share parameters
+        # Create a Client which will be used to recalculate the signature
+        # Parmaters to Client depend on signature method which may vary 
+        # for each request. Note that HMAC-SHA1 and PLAINTEXT share parameters
         if signature_method == SIGNATURE_RSA:
+            rsa_key = self.get_rsa_key(client_key)
             oauth_client = Client(client_key,
                 resource_owner_key=resource_owner_key,
                 callback_uri=callback_uri,
                 signature_method=signature_method,
                 signature_type=signature_type,
-                rsa_key=self.rsa_key, verifier=verifier)
+                rsa_key=rsa_key, verifier=verifier)
         else:
             client_secret = self.get_client_secret(client_key)
             resource_owner_secret = self.get_resource_owner_secret(
@@ -341,10 +397,23 @@ class Server(object):
                 signature_type=signature_type,
                 verifier=verifier)
 
-        request = Request(uri, http_method, body, headers)
+        # Recalculate the OAuth signature
         request.oauth_params = params
-
         client_signature = oauth_client.get_oauth_signature(request)
 
-        # FIXME: use near constant time string compare to avoid timing attacks
-        return client_signature == request_signature
+        # Constant time string comparision to avoid timing attacks
+        # http://rdist.root.org/2010/01/07/timing-independent-array-comparison/
+        if len(client_signature) != len(request_signature):
+            return False
+        result = 0
+        for x, y in zip(client_signature, request_signature):
+            result |= ord(x) ^ ord(y)
+        
+        valid_signature = result == 0
+        # We delay checking validity until the very end, using dummy values for
+        # calculations and fetching secrets/keys to ensure the flow of every
+        # request remains almost identical regardless of whether valid values
+        # have been supplied. This ensures near constant time execution and 
+        # prevents malicious users from guessing sensitive information.
+        return all((valid_client, valid_resource_owner, valid_nonce,
+                   valid_realm, valid_signature))
