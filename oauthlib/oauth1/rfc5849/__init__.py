@@ -24,6 +24,9 @@ SIGNATURE_METHODS = (SIGNATURE_HMAC, SIGNATURE_RSA, SIGNATURE_PLAINTEXT)
 SIGNATURE_TYPE_AUTH_HEADER = u'AUTH_HEADER'
 SIGNATURE_TYPE_QUERY = u'QUERY'
 SIGNATURE_TYPE_BODY = u'BODY'
+SIGNATURE_TYPES = (SIGNATURE_TYPE_AUTH_HEADER, 
+                   SIGNATURE_TYPE_QUERY,
+                   SIGNATURE_TYPE_BODY)
 
 CONTENT_TYPE_FORM_URLENCODED = u'application/x-www-form-urlencoded'
 
@@ -216,6 +219,17 @@ class Client(object):
 class Server(object):
     """A server used to verify OAuth 1.0 RFC 5849 requests"""
 
+    def __init__(self):
+        pass
+
+    @property
+    def allowed_signature_methods(self):
+        return SIGNATURE_METHODS
+
+    @property 
+    def allowed_signature_types(self):
+        return SIGNATURE_TYPES
+
     @property
     def safe_characters(self):
         return set(utils.UNICODE_ASCII_CHARACTER_SET)
@@ -236,8 +250,9 @@ class Server(object):
     def verifier_length(self):
         return 20, 30
 
-    def __init__(self):
-        pass
+    @property
+    def enforce_ssl(self):
+        return True
 
     def check_client_key(self, client_key):
         lower, upper = self.client_key_length
@@ -362,9 +377,17 @@ class Server(object):
         """
         request = Request(uri, http_method, body, headers)
 
+        if self.enforce_ssl and not request.uri.lower().startswith("https://"):
+            raise ValueError("Insecure transport, only HTTPS is allowed.")
+
         signature_type, params = self.get_signature_type_and_params(request)
 
-        # the parameters may not include duplicate oauth entries
+        # Providers may restrict from which sources parameters are supplied.
+        # Default is all three; query, headers, body
+        if not signature_type in self.allowed_signature_types:
+            raise ValueError("Invalid signature type.")
+
+        # The parameters may not include duplicate oauth entries
         filtered_params = utils.filter_oauth_params(params)
         if len(filtered_params) != len(params):
             raise ValueError("Duplicate OAuth entries.")
@@ -401,8 +424,9 @@ class Server(object):
         except ValueError:
             raise ValueError("Timestamp must be an integer")
 
-        # Signature method must one of RSA-SHA1, HMAC-SHA1, PLAINTEXT
-        if not signature_method in SIGNATURE_METHODS:
+        # Providers can restrict which signature methods they support but the
+        # signature method must always be RSA-SHA1; HMAC-SHA1; or PLAINTEXT
+        if not signature_method in self.allowed_signature_methods:
             raise ValueError("Invalid signature method.")
 
         # Provider specific validation of parameters, used to enforce

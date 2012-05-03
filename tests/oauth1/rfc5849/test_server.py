@@ -21,6 +21,10 @@ class ServerTests(TestCase):
         def resource_owner_key_length(self):
             return 16, 16
 
+        @property
+        def enforce_ssl(self):
+            return False
+
         def get_client_secret(self, client_key):
             return ServerTests.CLIENT_SECRET
 
