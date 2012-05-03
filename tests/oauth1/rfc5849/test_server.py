@@ -12,23 +12,35 @@ class ServerTests(TestCase):
     RESOURCE_OWNER_SECRET = u'just-a-string    asdasd'
 
     class TestServer(Server):
+
+        @property
+        def client_key_length(self):
+            return 16, 16
+
+        @property
+        def resource_owner_key_length(self):
+            return 16, 16
+
         def get_client_secret(self, client_key):
             return ServerTests.CLIENT_SECRET
 
         def get_resource_owner_secret(self, resource_owner_key):
             return ServerTests.RESOURCE_OWNER_SECRET
 
-        def check_client_key(self, client_key):
+        def validate_client_key(self, client_key):
             return ServerTests.CLIENT_KEY == client_key
 
-        def check_resource_owner_key(self, client_key, resource_owner_key):
+        def validate_resource_owner_key(self, client_key, resource_owner_key):
             return (ServerTests.CLIENT_KEY == client_key and
                     ServerTests.RESOURCE_OWNER_KEY == resource_owner_key)
 
-        def check_timestamp_and_nonce(self, timestamp, nonce):
+        def validate_timestamp_and_nonce(self, timestamp, nonce):
             return True
 
-        def check_realm(self, client_key, resource_owner_key, realm, uri):
+        def validate_realm(self, client_key, resource_owner_key, realm, uri):
+            return True
+
+        def validate_verifier(self, client_key, resource_owner_key, verifier):
             return True
 
     def test_basic_server_request(self):

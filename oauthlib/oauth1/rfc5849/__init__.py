@@ -215,8 +215,55 @@ class Client(object):
 
 class Server(object):
     """A server used to verify OAuth 1.0 RFC 5849 requests"""
+
+    @property
+    def safe_characters(self):
+        return set(utils.UNICODE_ASCII_CHARACTER_SET)
+
+    @property
+    def client_key_length(self):
+        return 20, 30
+
+    @property
+    def resource_owner_key_length(self):
+        return 20, 30
+
+    @property
+    def nonce_length(self):
+        return 20, 30
+
+    @property 
+    def verifier_length(self):
+        return 20, 30
+
     def __init__(self):
         pass
+
+    def check_client_key(self, client_key):
+        lower, upper = self.client_key_length
+        return (set(client_key) <= self.safe_characters and 
+                lower <= len(client_key) <= upper)
+
+    def check_resource_owner_key(self, resource_owner_key):
+        if resource_owner_key is None:
+            return True
+        lower, upper = self.resource_owner_key_length
+        return (set(resource_owner_key) <= self.safe_characters and 
+                lower <= len(resource_owner_key) <= upper)
+
+    def check_nonce(self, nonce):
+        lower, upper = self.nonce_length
+        logging.debug("HAI %s" % len(nonce))
+        return (set(nonce) <= self.safe_characters and 
+                lower <= len(nonce) <= upper)
+
+    def check_verifier(self, verifier):
+        if verifier is None: 
+            return True
+        lower, upper = self.verifier_length
+        return (set(verifier) <= self.safe_characters and 
+                lower <= len(verifier) <= upper)
+
 
     def get_client_secret(self, client_key):
         raise NotImplementedError("Subclasses must implement this function.")
@@ -259,16 +306,22 @@ class Server(object):
 
         return signature_type, dict(params)
 
-    def check_client_key(self, client_key):
+    def validate_client_key(self, client_key):
         raise NotImplementedError("Subclasses must implement this function.")
 
-    def check_resource_owner_key(self, client_key, resource_owner_key):
+    def validate_resource_owner_key(self, client_key, resource_owner_key):
         raise NotImplementedError("Subclasses must implement this function.")
 
-    def check_timestamp_and_nonce(self, timestamp, nonce):
+    def validate_timestamp_and_nonce(self, timestamp, nonce):
         raise NotImplementedError("Subclasses must implement this function.")
 
-    def check_realm(self, client_key, resource_owner_key, realm, uri):
+    def validate_redirect_uri(self, client_key, redirect_uri):
+        raise NotImplementedError("Subclasses must implement this function.")
+        
+    def validate_realm(self, client_key, resource_owner_key, realm, uri):
+        raise NotImplementedError("Subclasses must implement this function.")
+
+    def validate_verifier(self, client_key, resource_owner_key):
         raise NotImplementedError("Subclasses must implement this function.")
 
     def verify_request(self, uri, http_method=u'GET', body=None,
@@ -325,6 +378,7 @@ class Server(object):
         callback_uri = params.get(u'oauth_callback')
         verifier = params.get(u'oauth_verifier')
         signature_method = params.get(u'oauth_signature_method')
+        realm = params.get(u'realm')
 
         # Ensure all mandatory parameters are present
         if not all((request_signature, client_key, nonce,
@@ -334,8 +388,6 @@ class Server(object):
         # If version is supplied, it must be "1.0"
         if u'oauth_version' in params and params[u'oauth_version'] != u'1.0':
             raise ValueError("Invalid OAuth version.")
-
-
 
         # Timestamps must be integers and not older than 10 minutes and
         # have length 10 (for the next 200 years). 
@@ -353,25 +405,44 @@ class Server(object):
         if not signature_method in SIGNATURE_METHODS:
             raise ValueError("Invalid signature method.")
 
+        # Provider specific validation of parameters, used to enforce
+        # restrictions such as character set and length. 
+        if not self.check_client_key(client_key):
+            raise ValueError("Invalid client key.")
+
+        if not self.check_resource_owner_key(resource_owner_key):
+            raise ValueError("Invalid resource owner key.")
+
+        if not self.check_nonce(nonce):
+            raise ValueError("Invalid nonce.")
+
+        if not self.check_verifier(verifier):
+            raise ValueError("Invalid verifier.")
+
+
         # Check if the client is valid and not expired
         # If not assign a dummy client (see timing attacks above)
-        valid_client = self.check_client_key(client_key)
+        valid_client = self.validate_client_key(client_key)
         if not valid_client: 
             client_key = self.get_dummy_client()
 
         # Check if resource owner key is valid and not expired
         # If not assig a dummy resource owner (see timing attacks above)
-        valid_resource_owner = self.check_resource_owner_key(client_key, resource_owner_key)
+        valid_resource_owner = self.validate_resource_owner_key(
+            client_key, resource_owner_key)
         if not valid_resource_owner:
             resource_owner_key = self.get_dummy_resource_owner()
 
         # Ensure the nonce and timestamp haven't been used before
-        valid_nonce = self.check_timestamp_and_nonce(timestamp, nonce)
+        valid_nonce = self.validate_timestamp_and_nonce(timestamp, nonce)
 
-        # Ensure client is authorized access
-        realm = params.get(u'realm')
-        valid_realm = self.check_realm(client_key, resource_owner_key,
+        # Ensure client is authorized access to the realm
+        valid_realm = self.validate_realm(client_key, resource_owner_key,
                                        realm, request.uri)
+
+        # Ensure verifier is valid and not expired
+        valid_verifier = self.validate_verifier(client_key, 
+                                                resource_owner_key, verifier)
 
         # Create a Client which will be used to recalculate the signature
         # Parmaters to Client depend on signature method which may vary 
@@ -416,4 +487,4 @@ class Server(object):
         # have been supplied. This ensures near constant time execution and 
         # prevents malicious users from guessing sensitive information.
         return all((valid_client, valid_resource_owner, valid_nonce,
-                   valid_realm, valid_signature))
+                   valid_realm, valid_verifier, valid_signature))
