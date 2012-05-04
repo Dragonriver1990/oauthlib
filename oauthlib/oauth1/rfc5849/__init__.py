@@ -217,7 +217,69 @@ class Client(object):
 
 
 class Server(object):
-    """A server used to verify OAuth 1.0 RFC 5849 requests"""
+    """A server base class used to verify OAuth 1.0 RFC 5849 requests
+    
+    OAuth providers should inherit from Server and implement the methods
+    and properties outlined below. Further details are provided in the
+    documentation for each method and property.
+
+    Methods used to check the format of input parameters. Common tests include
+    length, character set, membership, range or pattern. These tests are 
+    referred to as `whitelisting or blacklisting`_. Whitelisting is better
+    but blacklisting can be usefull to spot malicious activity. 
+    The following have a default implementation:
+
+    - check_client_key
+    - check_resource_owner_key
+    - check_nonce
+    - check_verifier
+    - check_realm
+    
+    The methods above default to whitelist input parameters, checking that they
+    are alphanumerical and between a minimum and maximum length. Rather than
+    overloading the methods a few properties can be used to configure these
+    methods.
+
+    @ safe_characters -> (character set)
+    @ client_key_length -> (min, max)
+    @ resource_owner_key_length -> (min, max)
+    @ nonce_length -> (min, max)
+    @ verifier_length -> (min, max)
+    @ realms -> [list, of, realms]
+
+    Methods used to validate input parameters. These checks usually hit either
+    persistent or temporary storage such as databases or the filesystem. See
+    each methods documentation for detailed usage.
+    The following must be implemented:
+
+    - validate_client
+    - validate_resource_owner
+    - validate_nonce_and_timestamp
+    - validate_redirect_uri
+    - validate_realm
+    - validate_verifier
+
+    Method used to retrieve sensitive information from storage.
+    The following must be implemented:
+
+    - get_client_secret
+    - get_resource_owner_secret
+    - get_rsa_key
+
+    To prevent timing attacks it is necessary to not exit early even if the
+    client key or resource owner key is invalid. Instead dummy values should
+    be used during the remaining verification process. It is very important
+    that the dummy client and resource owner is valid input to the methods
+    get_client_secret, get_rsa_key and get_resource_owner_secret and that
+    the running time of those methods when given a dummy value remain 
+    equivalent to the running time when given a valid client/resource owner.
+    The following must be implemented:
+
+    - get_dummy_client
+    - get_dummy_resource_owner
+
+    .. _`whitelisting or blacklisting`: http://www.schneier.com/blog/archives/2011/01/whitelisting_vs.html
+    """
 
     def __init__(self):
         pass
@@ -251,15 +313,27 @@ class Server(object):
         return 20, 30
 
     @property
+    def realms(self):
+        return []
+
+    @property
     def enforce_ssl(self):
         return True
 
     def check_client_key(self, client_key):
+        """Check that the client key only contains safe characters
+        and is no shorter than lower and no longer than upper.
+        """
         lower, upper = self.client_key_length
         return (set(client_key) <= self.safe_characters and 
                 lower <= len(client_key) <= upper)
 
     def check_resource_owner_key(self, resource_owner_key):
+        """Check that the resource owner key contains only safe characters
+        and is no shorter than lower and no longer than upper.
+        A key of None is assumed to belong to a request in which the key
+        is not mandatory, thus returns True.
+        """
         if resource_owner_key is None:
             return True
         lower, upper = self.resource_owner_key_length
@@ -267,32 +341,94 @@ class Server(object):
                 lower <= len(resource_owner_key) <= upper)
 
     def check_nonce(self, nonce):
+        """Check that the nonce only contains only safe characters
+        and is no shorter than lower and no longer than upper.
+        """
         lower, upper = self.nonce_length
         logging.debug("HAI %s" % len(nonce))
         return (set(nonce) <= self.safe_characters and 
                 lower <= len(nonce) <= upper)
 
     def check_verifier(self, verifier):
+        """Check that the verifier contains only safe characters
+        and is no shorter than lower and no longer than upper.
+        A verifier of None is assumed to belong to a request in which the
+        verifier is not mandatory, thus returns True.
+        """
         if verifier is None: 
             return True
         lower, upper = self.verifier_length
         return (set(verifier) <= self.safe_characters and 
                 lower <= len(verifier) <= upper)
 
+    def check_realm(self, realm):
+        """Check that the realm is one of a set allowed realms.
+        A realm of None is assumed to belong to a request using the default
+        realm of the provider which is assumed to be accessible by all
+        clients and consequently True is returned. 
+
+        Providers which want to mandate that clients provide a realm on all
+        request should overload this method and return False if realm is None.
+        """
+        if realm is None:
+            return True
+        return realm in self.realms
+
 
     def get_client_secret(self, client_key):
+        """Retrieve the client secret associated with the client key.
+
+        This method must allow the use of a dummy client_key value.
+        Fetching the secret using the dummy key must take the same amount of
+        time as fetching a secret for a valid client. 
+
+        Note that the returned key must be in plaintext.
+        """
         raise NotImplementedError("Subclasses must implement this function.")
 
     def get_dummy_client(self):
+        """Dummy client used when an invalid client key is supplied.
+
+        The dummy client should be associated with either a client secret, 
+        a rsa key or both depending on which signature methods are supported.
+        Providers should make sure that
+        
+        get_client_secret(dummy_client)
+        get_rsa_key(dummy_client)
+
+        return a valid secret or key for the dummy client. 
+        """       
         raise NotImplementedError("Subclasses must implement this function.")
 
     def get_resource_owner_secret(self, resource_owner_key):
+        """Retrieve the client secret associated with the resource owner key.
+
+        This method must allow the use of a dummy resource_owner_key value.
+        Fetching the secret using the dummy key must take the same amount of
+        time as fetching a secret for a valid resource owner.
+
+        Note that the returned key must be in plaintext.
+        """
         raise NotImplementedError("Subclasses must implement this function.")
 
     def get_dummy_resource_owner(self):
+        """Dummy resource owner used when an invalid key is supplied.
+
+        The dummy resource owner should be associated with a resource owner
+        secret such that get_resource_owner_secret(dummy_resource_owner)
+        return a valid secret. 
+        """
         raise NotImplementedError("Subclasses must implement this function.")
     
-    def get_rsa_key(self):
+    def get_rsa_key(self, client_key):
+        """Retrieve a previously stored client provided RSA key.
+
+        This method must allow the use of a dummy client_key value. Fetching
+        the rsa key using the dummy key must take the same aount of time
+        as fetching a key for a valid client.
+
+        Note that the key must be returned in plaintext.
+        """
         raise NotImplementedError("Subclasses must implement this function.")
 
     def get_signature_type_and_params(self, request):
@@ -439,6 +575,9 @@ class Server(object):
 
         if not self.check_nonce(nonce):
             raise ValueError("Invalid nonce.")
+
+        if not self.check_realm(realm):
+            raise ValueError("Invalid realm.")
 
         if not self.check_verifier(verifier):
             raise ValueError("Invalid verifier.")
