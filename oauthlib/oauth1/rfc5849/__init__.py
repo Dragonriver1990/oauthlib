@@ -305,6 +305,10 @@ class Server(object):
         return 20, 30
 
     @property
+    def timestamp_lifetime(self):
+        return 600
+
+    @property
     def nonce_length(self):
         return 20, 30
 
@@ -523,7 +527,8 @@ class Server(object):
         if not signature_type in self.allowed_signature_types:
             raise ValueError("Invalid signature type.")
 
-        # The parameters may not include duplicate oauth entries
+        # The server SHOULD return a 400 (Bad Request) status code when
+        # receiving a request with duplicated protocol parameters.
         filtered_params = utils.filter_oauth_params(params)
         if len(filtered_params) != len(params):
             raise ValueError("Duplicate OAuth entries.")
@@ -539,31 +544,44 @@ class Server(object):
         signature_method = params.get(u'oauth_signature_method')
         realm = params.get(u'realm')
 
-        # Ensure all mandatory parameters are present
+        # The server SHOULD return a 400 (Bad Request) status code when
+        # receiving a request with missing parameters.
         if not all((request_signature, client_key, nonce,
                     timestamp, signature_method)):
             raise ValueError("Missing OAuth parameters.")
 
-        # If version is supplied, it must be "1.0"
+        # Servers receiving an authenticated request MUST validate it by:
+        #   If the "oauth_version" parameter is present, ensuring its value is
+        #   "1.0".
         if u'oauth_version' in params and params[u'oauth_version'] != u'1.0':
             raise ValueError("Invalid OAuth version.")
 
-        # Timestamps must be integers and not older than 10 minutes and
-        # have length 10 (for the next 200 years). 
+        # The timestamp value MUST be a positive integer. Unless otherwise
+        # specified by the server's documentation, the timestamp is expressed
+        # in the number of seconds since January 1, 1970 00:00:00 GMT.
         if len(timestamp) != 10:
             raise ValueError("Invalid timestamp size")
         try:
             ts = int(timestamp)
-            if time.time() - ts > 600:
+            # To avoid the need to retain an infinite number of nonce values for
+            # future checks, servers MAY choose to restrict the time period after
+            # which a request with an old timestamp is rejected.
+            if time.time() - ts > self.timestamp_lifetime:
                 raise ValueError("Request too old, over 10 minutes.")
         
         except ValueError:
             raise ValueError("Timestamp must be an integer")
 
-        # Providers can restrict which signature methods they support but the
-        # signature method must always be RSA-SHA1; HMAC-SHA1; or PLAINTEXT
-        if not signature_method in self.allowed_signature_methods:
-            raise ValueError("Invalid signature method.")
+        # OAuth does not mandate a particular signature method, as each
+        # implementation can have its own unique requirements.  Servers are
+        # free to implement and document their own custom methods.
+        # Recommending any particular method is beyond the scope of this
+        # specification.  Implementers should review the Security
+        # Considerations section (`Section 4`_) before deciding on which 
+        # method to support.
+        # .. _`Section 4`: http://tools.ietf.org/html/rfc5849#section-4
+            if not signature_method in self.allowed_signature_methods:
+                raise ValueError("Invalid signature method.")
 
         # Provider specific validation of parameters, used to enforce
         # restrictions such as character set and length. 
@@ -583,32 +601,53 @@ class Server(object):
             raise ValueError("Invalid verifier.")
 
 
-        # Check if the client is valid and not expired
-        # If not assign a dummy client (see timing attacks above)
+        # The server SHOULD return a 401 (Unauthorized) status code when
+        # receiving a request with invalid client credentials.
+        # Note: This is postponed in order to avoid timing attacks, instead
+        # a dummy client is assigned and used to maintain near constant
+        # time request verification.
         valid_client = self.validate_client_key(client_key)
         if not valid_client: 
             client_key = self.get_dummy_client()
 
-        # Check if resource owner key is valid and not expired
-        # If not assig a dummy resource owner (see timing attacks above)
+        # The server SHOULD return a 401 (Unauthorized) status code when
+        # receiving a request with invalid or expired token.
+        # Note: This is postponed in order to avoid timing attacks, instead
+        # a dummy token is assigned and used to maintain near constant
+        # time request verification.
         valid_resource_owner = self.validate_resource_owner_key(
             client_key, resource_owner_key)
         if not valid_resource_owner:
             resource_owner_key = self.get_dummy_resource_owner()
 
-        # Ensure the nonce and timestamp haven't been used before
+        # Servers receiving an authenticated request MUST validate it by:
+        #   If using the "HMAC-SHA1" or "RSA-SHA1" signature methods, ensuring
+        #   that the combination of nonce/timestamp/token (if present)
+        #   received from the client has not been used before in a previous
+        #   request (the server MAY reject requests with stale timestamps as
+        #   described in `Section 3.3`_).
+        # .._`Section 3.3`: http://tools.ietf.org/html/rfc5849#section-3.3
         valid_nonce = self.validate_timestamp_and_nonce(timestamp, nonce)
 
-        # Ensure client is authorized access to the realm
+        # Note that `realm`_ is only used in authorization headers and how
+        # it should be interepreted is not included in the OAuth spec.
+        # However they could be seen as a scope or realm to which the 
+        # client has access and as such every client should be checked
+        # to ensure it is authorized access to that scope or realm. 
+        # .. _`realm`: http://tools.ietf.org/html/rfc2617#section-1.2
         valid_realm = self.validate_realm(client_key, resource_owner_key,
                                        realm, request.uri)
 
-        # Ensure verifier is valid and not expired
+        # The server MUST verify (Section 3.2) the validity of the request,
+        # ensure that the resource owner has authorized the provisioning of
+        # token credentials to the client, and ensure that the temporary
+        # credentials have not expired or been used before.  The server MUST
+        # also verify the verification code received from the client.
+        # .. _`Section 3.2`: http://tools.ietf.org/html/rfc5849#section-3.2
         valid_verifier = self.validate_verifier(client_key, 
                                                 resource_owner_key, verifier)
 
-        # Create a Client which will be used to recalculate the signature
-        # Parmaters to Client depend on signature method which may vary 
+        # Parameters to Client depend on signature method which may vary 
         # for each request. Note that HMAC-SHA1 and PLAINTEXT share parameters
         if signature_method == SIGNATURE_RSA:
             rsa_key = self.get_rsa_key(client_key)
@@ -631,7 +670,11 @@ class Server(object):
                 signature_type=signature_type,
                 verifier=verifier)
 
-        # Recalculate the OAuth signature
+        # Servers receiving an authenticated request MUST validate it by:
+        #   Recalculating the request signature independently as described in
+        #   `Section 3.4`_ and comparing it to the value received from the 
+        #   client via the "oauth_signature" parameter.
+        # _`Section 3.4`: http://tools.ietf.org/html/rfc5849#section-3.4
         request.oauth_params = params
         client_signature = oauth_client.get_oauth_signature(request)
 
