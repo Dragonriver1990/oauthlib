@@ -38,7 +38,8 @@ class ServerTests(TestCase):
             return (ServerTests.CLIENT_KEY == client_key and
                     ServerTests.RESOURCE_OWNER_KEY == resource_owner_key)
 
-        def validate_timestamp_and_nonce(self, timestamp, nonce):
+        def validate_timestamp_and_nonce(self, client_key, timestamp, nonce,
+            resource_owner_key=None):
             return True
 
         def validate_realm(self, client_key, resource_owner_key, realm, uri):
