@@ -288,10 +288,6 @@ class Server(object):
     def allowed_signature_methods(self):
         return SIGNATURE_METHODS
 
-    @property 
-    def allowed_signature_types(self):
-        return SIGNATURE_TYPES
-
     @property
     def safe_characters(self):
         return set(utils.UNICODE_ASCII_CHARACTER_SET)
@@ -440,27 +436,31 @@ class Server(object):
         """Extracts parameters from query, headers and body. Signature type 
         is set to the source in which parameters were found.
         """
-        signature_types_with_oauth_params = filter(lambda s: s[1], (
-            (SIGNATURE_TYPE_AUTH_HEADER, utils.filter_oauth_params(
-                signature.collect_parameters(headers=request.headers,
-                exclude_oauth_signature=False))),
-            (SIGNATURE_TYPE_BODY, utils.filter_oauth_params(
-                signature.collect_parameters(body=request.body,
-                exclude_oauth_signature=False))),
-            (SIGNATURE_TYPE_QUERY, utils.filter_oauth_params(
-                signature.collect_parameters(uri_query=request.uri_query,
-                exclude_oauth_signature=False))),
+        header_params = signature.collect_parameters(headers=request.headers,
+                exclude_oauth_signature=False)
+        body_params = signature.collect_parameters(body=request.body,
+                exclude_oauth_signature=False)
+        query_params = signature.collect_parameters(uri_query=request.uri_query,
+                exclude_oauth_signature=False)
+
+        signature_types_with_oauth_params = filter(lambda s: s[2], (
+            (SIGNATURE_TYPE_AUTH_HEADER, header_params,
+                utils.filter_oauth_params(header_params)),
+            (SIGNATURE_TYPE_BODY, body_params,
+                utils.filter_oauth_params(body_params)),
+            (SIGNATURE_TYPE_QUERY, query_params, 
+                utils.filter_oauth_params(query_params))
         ))
 
         if len(signature_types_with_oauth_params) > 1:
             raise ValueError('oauth_ params must come from only 1 signature type but were found in %s' % ', '.join(
                 [s[0] for s in signature_types_with_oauth_params]))
         try:
-            signature_type, params = signature_types_with_oauth_params[0]
+            signature_type, params, oauth_params = signature_types_with_oauth_params[0]
         except IndexError:
             raise ValueError('oauth_ params are missing. Could not determine signature type.')
 
-        return signature_type, dict(params)
+        return signature_type, params, oauth_params
 
     def validate_client_key(self, client_key):
         """Validate that supplied client key is a registered and valid client.
@@ -591,20 +591,15 @@ class Server(object):
         if self.enforce_ssl and not request.uri.lower().startswith("https://"):
             raise ValueError("Insecure transport, only HTTPS is allowed.")
 
-        signature_type, params = self.get_signature_type_and_params(request)
-
-        # Providers may restrict from which sources parameters are supplied.
-        # Default is all three; query, headers, body
-        if not signature_type in self.allowed_signature_types:
-            raise ValueError("Invalid signature type.")
+        signature_type, params, oauth_params = self.get_signature_type_and_params(request)
 
         # The server SHOULD return a 400 (Bad Request) status code when
         # receiving a request with duplicated protocol parameters.
-        filtered_params = utils.filter_oauth_params(params)
-        if len(filtered_params) != len(params):
+        # TODO: header duplicates not detected due to premature? dict()
+        if len(dict(oauth_params)) != len(oauth_params):
             raise ValueError("Duplicate OAuth entries.")
 
-        params = dict(params)
+        params = dict(params) 
         request_signature = params.get(u'oauth_signature')
         client_key = params.get(u'oauth_consumer_key')
         resource_owner_key = params.get(u'oauth_token')
@@ -621,6 +616,17 @@ class Server(object):
                     timestamp, signature_method)):
             raise ValueError("Missing OAuth parameters.")
 
+        # OAuth does not mandate a particular signature method, as each
+        # implementation can have its own unique requirements.  Servers are
+        # free to implement and document their own custom methods.
+        # Recommending any particular method is beyond the scope of this
+        # specification.  Implementers should review the Security
+        # Considerations section (`Section 4`_) before deciding on which 
+        # method to support.
+        # .. _`Section 4`: http://tools.ietf.org/html/rfc5849#section-4
+        if not signature_method in self.allowed_signature_methods:
+            raise ValueError("Invalid signature method.")
+
         # Servers receiving an authenticated request MUST validate it by:
         #   If the "oauth_version" parameter is present, ensuring its value is
         #   "1.0".
@@ -634,25 +640,16 @@ class Server(object):
             raise ValueError("Invalid timestamp size")
         try:
             ts = int(timestamp)
+        
+        except ValueError:
+            raise ValueError("Timestamp must be an integer")
+
+        else:
             # To avoid the need to retain an infinite number of nonce values for
             # future checks, servers MAY choose to restrict the time period after
             # which a request with an old timestamp is rejected.
             if time.time() - ts > self.timestamp_lifetime:
                 raise ValueError("Request too old, over 10 minutes.")
-        
-        except ValueError:
-            raise ValueError("Timestamp must be an integer")
-
-        # OAuth does not mandate a particular signature method, as each
-        # implementation can have its own unique requirements.  Servers are
-        # free to implement and document their own custom methods.
-        # Recommending any particular method is beyond the scope of this
-        # specification.  Implementers should review the Security
-        # Considerations section (`Section 4`_) before deciding on which 
-        # method to support.
-        # .. _`Section 4`: http://tools.ietf.org/html/rfc5849#section-4
-            if not signature_method in self.allowed_signature_methods:
-                raise ValueError("Invalid signature method.")
 
         # Provider specific validation of parameters, used to enforce
         # restrictions such as character set and length. 
@@ -686,10 +683,14 @@ class Server(object):
         # Note: This is postponed in order to avoid timing attacks, instead
         # a dummy token is assigned and used to maintain near constant
         # time request verification.
-        valid_resource_owner = self.validate_resource_owner_key(
-            client_key, resource_owner_key)
-        if not valid_resource_owner:
-            resource_owner_key = self.dummy_resource_owner
+        if resource_owner_key:
+            valid_resource_owner = self.validate_resource_owner_key(
+                client_key, resource_owner_key)
+            if not valid_resource_owner:
+                resource_owner_key = self.dummy_resource_owner
+        else:
+            # TODO: use flag to indicate if token is needed
+            valid_resource_owner = True
 
         # Servers receiving an authenticated request MUST validate it by:
         #   If using the "HMAC-SHA1" or "RSA-SHA1" signature methods, ensuring

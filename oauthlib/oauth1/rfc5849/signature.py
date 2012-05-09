@@ -462,7 +462,7 @@ def sign_rsa_sha1(base_string, rsa_private_key):
     import rsa
     key = rsa.PrivateKey.load_pkcs1(rsa_private_key)
     sig = rsa.sign(base_string, key, 'SHA-1')
-    return binascii.b2a_base64(sig)[:-1]
+    return binascii.b2a_base64(sig)[:-1].decode('utf-8')
 
 
 def sign_plaintext(client_secret, resource_owner_secret):
