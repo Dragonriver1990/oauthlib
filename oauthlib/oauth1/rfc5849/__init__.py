@@ -334,8 +334,6 @@ class Server(object):
         A key of None is assumed to belong to a request in which the key
         is not mandatory, thus returns True.
         """
-        if resource_owner_key is None:
-            return True
         lower, upper = self.resource_owner_key_length
         return (set(resource_owner_key) <= self.safe_characters and 
                 lower <= len(resource_owner_key) <= upper)
@@ -354,8 +352,6 @@ class Server(object):
         A verifier of None is assumed to belong to a request in which the
         verifier is not mandatory, thus returns True.
         """
-        if verifier is None: 
-            return True
         lower, upper = self.verifier_length
         return (set(verifier) <= self.safe_characters and 
                 lower <= len(verifier) <= upper)
@@ -369,8 +365,6 @@ class Server(object):
         Providers which want to mandate that clients provide a realm on all
         request should overload this method and return False if realm is None.
         """
-        if realm is None:
-            return True
         return realm in self.realms
 
 
@@ -556,7 +550,8 @@ class Server(object):
         raise NotImplementedError("Subclasses must implement this function.")
 
     def verify_request(self, uri, http_method=u'GET', body=None,
-            headers=None):
+            headers=None, require_resource_owner=True, require_verifier=False, 
+            require_realm=False):
         """Verifies a request ensuring that the following is true:
 
         Per `section 3.2`_ of the spec.
@@ -656,18 +651,42 @@ class Server(object):
         if not self.check_client_key(client_key):
             raise ValueError("Invalid client key.")
 
-        if not self.check_resource_owner_key(resource_owner_key):
+        if not resource_owner_key and require_resource_owner:
+            raise ValueError("Missing resource owner.")
+
+        if (require_resource_owner and 
+            not self.check_resource_owner_key(resource_owner_key)):
             raise ValueError("Invalid resource owner key.")
 
         if not self.check_nonce(nonce):
             raise ValueError("Invalid nonce.")
 
-        if not self.check_realm(realm):
+        if not realm and require_realm:
+            raise ValueError("Missing realm.")
+
+        if require_realm and not self.check_realm(realm):
             raise ValueError("Invalid realm.")
 
-        if not self.check_verifier(verifier):
+        if not verifier and require_verifier:
+            raise ValueError("Missing verifier.")
+
+        if require_verifier and not self.check_verifier(verifier):
             raise ValueError("Invalid verifier.")
 
+
+        # Servers receiving an authenticated request MUST validate it by:
+        #   If using the "HMAC-SHA1" or "RSA-SHA1" signature methods, ensuring
+        #   that the combination of nonce/timestamp/token (if present)
+        #   received from the client has not been used before in a previous
+        #   request (the server MAY reject requests with stale timestamps as
+        #   described in `Section 3.3`_).
+        # .._`Section 3.3`: http://tools.ietf.org/html/rfc5849#section-3.3
+        #
+        # We check this before validating client and resource owner for
+        # increased security and performance, both gained by doing less work.
+        if not self.validate_timestamp_and_nonce(client_key, timestamp, 
+            nonce, resource_owner_key):
+                return False
 
         # The server SHOULD return a 401 (Unauthorized) status code when
         # receiving a request with invalid client credentials.
@@ -692,15 +711,6 @@ class Server(object):
             # TODO: use flag to indicate if token is needed
             valid_resource_owner = True
 
-        # Servers receiving an authenticated request MUST validate it by:
-        #   If using the "HMAC-SHA1" or "RSA-SHA1" signature methods, ensuring
-        #   that the combination of nonce/timestamp/token (if present)
-        #   received from the client has not been used before in a previous
-        #   request (the server MAY reject requests with stale timestamps as
-        #   described in `Section 3.3`_).
-        # .._`Section 3.3`: http://tools.ietf.org/html/rfc5849#section-3.3
-        valid_nonce = self.validate_timestamp_and_nonce(client_key, timestamp, 
-            nonce, resource_owner_key)
 
         # Note that `realm`_ is only used in authorization headers and how
         # it should be interepreted is not included in the OAuth spec.
@@ -709,7 +719,7 @@ class Server(object):
         # to ensure it is authorized access to that scope or realm. 
         # .. _`realm`: http://tools.ietf.org/html/rfc2617#section-1.2
         valid_realm = self.validate_realm(client_key, resource_owner_key,
-                                       realm, request.uri)
+            realm, request.uri)
 
         # The server MUST verify (Section 3.2) the validity of the request,
         # ensure that the resource owner has authorized the provisioning of
@@ -718,7 +728,7 @@ class Server(object):
         # also verify the verification code received from the client.
         # .. _`Section 3.2`: http://tools.ietf.org/html/rfc5849#section-3.2
         valid_verifier = self.validate_verifier(client_key, 
-                                                resource_owner_key, verifier)
+            resource_owner_key, verifier)
 
         # Parameters to Client depend on signature method which may vary 
         # for each request. Note that HMAC-SHA1 and PLAINTEXT share parameters
@@ -765,5 +775,5 @@ class Server(object):
         # request remains almost identical regardless of whether valid values
         # have been supplied. This ensures near constant time execution and 
         # prevents malicious users from guessing sensitive information.
-        return all((valid_client, valid_resource_owner, valid_nonce,
-                   valid_realm, valid_verifier, valid_signature))
+        return all((valid_client, valid_resource_owner, valid_realm, 
+                    valid_verifier, valid_signature))

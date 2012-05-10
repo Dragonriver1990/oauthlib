@@ -65,6 +65,7 @@ class ServerTests(TestCase):
         d = Client(self.CLIENT_KEY,
             signature_method=SIGNATURE_RSA,
             rsa_key=self.RSA_KEY,
+            resource_owner_key=self.RESOURCE_OWNER_KEY,
         )
         
         s = self.TestServer()
@@ -202,6 +203,7 @@ class ServerTests(TestCase):
         Default setting is to only allow alphanumeric characters and a length
         between 20 and 30 characters.
         """
+        #TODO: injection attacks, file traversal
         ts = int(time.time())
 
         client=(u'oauth_signature=a&oauth_timestamp=%s&oauth_nonce=c&'
@@ -257,3 +259,9 @@ class ServerTests(TestCase):
         # By default no realms are allowed
         test = (ts, u'shibboleth')
         self.assertRaises(ValueError, s.verify_request, uri, body=realm % test)
+
+
+    def test_timing_attack(self):
+        """Ensure near constant time verification."""
+        #TODO:
+        pass
