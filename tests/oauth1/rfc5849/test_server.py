@@ -304,6 +304,7 @@ class ServerTests(TestCase):
             clients = [u'foo']
             nonces = [(u'foo', u'once', u'1234567891', u'fez')]
             owners = { u'foo' : [u'abcdefghijklmnopqrstuvxyz', u'fez'] }
+            assigned_realms = { (u'foo', u'fez') : u'photos' }
 
             @property
             def client_key_length(self):
@@ -316,6 +317,10 @@ class ServerTests(TestCase):
             @property
             def nonce_length(self):
                 return 2, 30
+
+            @property
+            def realms(self):
+                return [u'photos']
 
             @property
             def timestamp_lifetime(self):
@@ -342,7 +347,8 @@ class ServerTests(TestCase):
                         resource_owner_key in self.owners.get(client_key))
 
             def validate_realm(self, client_key, resource_owner_key, realm, uri):
-                return True
+                return ((client_key, resource_owner_key) in self.assigned_realms and
+                         realm in self.assigned_realms.get((client_key, resource_owner_key)))
 
             def get_client_secret(self, client_key):
                 return u'super secret'
@@ -379,15 +385,51 @@ class ServerTests(TestCase):
               u'oauth_token=invalid&'
               u'oauth_consumer_key=foo')
 
+        short_sig = (u'oauth_signature=fmrXnTF4lO4o%2BD0%2FlZaJHP%2FXqEY&'
+              u'oauth_timestamp=1234567890&'
+              u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
+              u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=abcdefghijklmnopqrstuvxyz&'
+              u'oauth_consumer_key=foo')
+
+        plain = (u'oauth_signature=correctlengthbutthewrongcontent1111&'
+              u'oauth_timestamp=1234567890&'
+              u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
+              u'oauth_version=1.0&oauth_signature_method=PLAINTEXT&'
+              u'oauth_token=abcdefghijklmnopqrstuvxyz&'
+              u'oauth_consumer_key=foo')
+
+        realm = (u'oauth_signature=qra7%2Bl70DVl34ezNbsBnoPnbrss%3D&'
+              u'oauth_timestamp=1234567890&'
+              u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
+              u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=fez&'
+              u'oauth_consumer_key=foo&realm=photos')
+
+
         uri = u'https://example.com/'
 
-        # Test client validation
+        # Test for used nonce + timestamp
         self.assertFalse(s.verify_request(uri, body=replay))
+
+        # Test client validation
         self.assertFalse(s.verify_request(uri, body=client.format(u'bar')))
         self.assertTrue(s.verify_request(uri, body=client.format(u'foo')))
         self.assertTrue(s.verify_request(uri, body=no_owner,
             require_resource_owner=False))
+
+        # Test resource owner validation
         self.assertFalse(s.verify_request(uri, body=invalid_owner))
+
+        # Test verifier validation
+
+        # Test realm validation
+        self.assertTrue(s.verify_request(uri, body=realm,
+            require_realm=True))
+
+        # Test signature verification
+        self.assertFalse(s.verify_request(uri, body=short_sig))
+        self.assertFalse(s.verify_request(uri, body=plain))
     
     def test_timing_attack(self):
         """Ensure near constant time verification."""

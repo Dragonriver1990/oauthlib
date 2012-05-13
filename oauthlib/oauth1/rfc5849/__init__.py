@@ -786,22 +786,17 @@ class Server(object):
             # .. _`Constant time string comparison`: http://rdist.root.org/2010/01/07/timing-independent-array-comparison/
             if len(client_signature) != len(request_signature):
                 return False
+
             result = 0
             for x, y in zip(client_signature, request_signature):
                 result |= ord(x) ^ ord(y)
         
             valid_signature = result == 0
 
-            print client_signature
-            print request_signature
-            print client_signature == request_signature
         # We delay checking validity until the very end, using dummy values for
         # calculations and fetching secrets/keys to ensure the flow of every
         # request remains almost identical regardless of whether valid values
         # have been supplied. This ensures near constant time execution and 
         # prevents malicious users from guessing sensitive information.
-
-        print (valid_client, valid_resource_owner, valid_realm, 
-                    valid_verifier, valid_signature)
         return all((valid_client, valid_resource_owner, valid_realm, 
                     valid_verifier, valid_signature))
