@@ -394,7 +394,7 @@ class Server(object):
         """       
         raise NotImplementedError("Subclasses must implement this function.")
 
-    def get_resource_owner_secret(self, resource_owner_key):
+    def get_resource_owner_secret(self, client_key, resource_owner_key):
         """Retrieve the client secret associated with the resource owner key.
 
         This method must allow the use of a dummy resource_owner_key value.
@@ -594,16 +594,16 @@ class Server(object):
         if len(dict(oauth_params)) != len(oauth_params):
             raise ValueError("Duplicate OAuth entries.")
 
-        params = dict(params) 
-        request_signature = params.get(u'oauth_signature')
-        client_key = params.get(u'oauth_consumer_key')
-        resource_owner_key = params.get(u'oauth_token')
-        nonce = params.get(u'oauth_nonce')
-        timestamp = params.get(u'oauth_timestamp')
-        callback_uri = params.get(u'oauth_callback')
-        verifier = params.get(u'oauth_verifier')
-        signature_method = params.get(u'oauth_signature_method')
-        realm = params.get(u'realm')
+        oauth_params = dict(oauth_params) 
+        request_signature = oauth_params.get(u'oauth_signature')
+        client_key = oauth_params.get(u'oauth_consumer_key')
+        resource_owner_key = oauth_params.get(u'oauth_token')
+        nonce = oauth_params.get(u'oauth_nonce')
+        timestamp = oauth_params.get(u'oauth_timestamp')
+        callback_uri = oauth_params.get(u'oauth_callback')
+        verifier = oauth_params.get(u'oauth_verifier')
+        signature_method = oauth_params.get(u'oauth_signature_method')
+        realm = dict(params).get(u'realm')
 
         # The server SHOULD return a 400 (Bad Request) status code when
         # receiving a request with missing parameters.
@@ -693,6 +693,8 @@ class Server(object):
         # Note: This is postponed in order to avoid timing attacks, instead
         # a dummy client is assigned and used to maintain near constant
         # time request verification.
+        #
+        # Note that early exit would enable client enumeration
         valid_client = self.validate_client_key(client_key)
         if not valid_client: 
             client_key = self.dummy_client
@@ -702,15 +704,19 @@ class Server(object):
         # Note: This is postponed in order to avoid timing attacks, instead
         # a dummy token is assigned and used to maintain near constant
         # time request verification.
+        #
+        # Note that early exit would enable resource owner enumeration
         if resource_owner_key:
             valid_resource_owner = self.validate_resource_owner_key(
                 client_key, resource_owner_key)
             if not valid_resource_owner:
                 resource_owner_key = self.dummy_resource_owner
-        else:
-            # TODO: use flag to indicate if token is needed
-            valid_resource_owner = True
 
+        # If there is no owner supplied and its not required, it's ok
+        # Remember that we already check and fail if required but not present
+        else:
+            valid_resource_owner = True
+            resource_owner_key = self.dummy_resource_owner
 
         # Note that `realm`_ is only used in authorization headers and how
         # it should be interepreted is not included in the OAuth spec.
@@ -718,8 +724,13 @@ class Server(object):
         # client has access and as such every client should be checked
         # to ensure it is authorized access to that scope or realm. 
         # .. _`realm`: http://tools.ietf.org/html/rfc2617#section-1.2
-        valid_realm = self.validate_realm(client_key, resource_owner_key,
-            realm, request.uri)
+        #
+        # Note that early exit would enable client realm access enumeration
+        if realm:
+            valid_realm = self.validate_realm(client_key, resource_owner_key,
+                                              realm, request.uri)
+        else:
+            valid_realm = True
 
         # The server MUST verify (Section 3.2) the validity of the request,
         # ensure that the resource owner has authorized the provisioning of
@@ -727,53 +738,70 @@ class Server(object):
         # credentials have not expired or been used before.  The server MUST
         # also verify the verification code received from the client.
         # .. _`Section 3.2`: http://tools.ietf.org/html/rfc5849#section-3.2
-        valid_verifier = self.validate_verifier(client_key, 
-            resource_owner_key, verifier)
+        #
+        # Note that early exit would enable resource owner authorization
+        # verifier enumertion. 
+        if verifier:
+            valid_verifier = self.validate_verifier(client_key,
+                resource_owner_key, verifier)
+        else:
+            valid_verifier = True
 
         # Parameters to Client depend on signature method which may vary 
         # for each request. Note that HMAC-SHA1 and PLAINTEXT share parameters
+
+        request.params = filter(lambda x: x[0] != "oauth_signature", params)
+        # ---- RSA Signature verification ----
         if signature_method == SIGNATURE_RSA:
+            # The server verifies the signature per `[RFC3447] section 8.2.2`_
+            # .. _`[RFC3447] section 8.2.2`: http://tools.ietf.org/html/rfc3447#section-8.2.1
             rsa_key = self.get_rsa_key(client_key)
-            oauth_client = Client(client_key,
-                resource_owner_key=resource_owner_key,
-                callback_uri=callback_uri,
-                signature_method=signature_method,
-                signature_type=signature_type,
-                rsa_key=rsa_key, verifier=verifier)
+            request.signature = request_signature
+            valid_signature = signature.verify_rsa(request, rsa_key)
+
+        # ---- HMAC or Plaintext Signature verification ----
         else:
+            # Servers receiving an authenticated request MUST validate it by:
+            #   Recalculating the request signature independently as described in
+            #   `Section 3.4`_ and comparing it to the value received from the 
+            #   client via the "oauth_signature" parameter.
+            # .. _`Section 3.4`: http://tools.ietf.org/html/rfc5849#section-3.4
             client_secret = self.get_client_secret(client_key)
             resource_owner_secret = self.get_resource_owner_secret(
-                resource_owner_key)
-            oauth_client = Client(client_key,
-                client_secret=client_secret,
-                resource_owner_key=resource_owner_key,
-                resource_owner_secret=resource_owner_secret,
-                callback_uri=callback_uri,
-                signature_method=signature_method,
-                signature_type=signature_type,
-                verifier=verifier)
+                client_key, resource_owner_key)
 
-        # Servers receiving an authenticated request MUST validate it by:
-        #   Recalculating the request signature independently as described in
-        #   `Section 3.4`_ and comparing it to the value received from the 
-        #   client via the "oauth_signature" parameter.
-        # .. _`Section 3.4`: http://tools.ietf.org/html/rfc5849#section-3.4
-        request.oauth_params = params
-        client_signature = oauth_client.get_oauth_signature(request)
+            if signature_method == SIGNATURE_HMAC:
+                norm_params = signature.normalize_parameters(request.params)
+                uri = signature.normalize_base_string_uri(request.uri)
+                base_string = signature.construct_base_string(request.http_method,
+                    uri, norm_params)
 
-        # `Constant time string comparision`_ to avoid timing attacks
-        # .. _`Constant time string comparison`: http://rdist.root.org/2010/01/07/timing-independent-array-comparison/
-        if len(client_signature) != len(request_signature):
-            return False
-        result = 0
-        for x, y in zip(client_signature, request_signature):
-            result |= ord(x) ^ ord(y)
+                client_signature = signature.sign_hmac_sha1(base_string, 
+                    client_secret, resource_owner_secret)
+            else:
+                client_signature = signature.sign_plaintext(client_secret,
+                    resource_owner_secret)
+
+            # `Constant time string comparision`_ to avoid timing attacks
+            # .. _`Constant time string comparison`: http://rdist.root.org/2010/01/07/timing-independent-array-comparison/
+            if len(client_signature) != len(request_signature):
+                return False
+            result = 0
+            for x, y in zip(client_signature, request_signature):
+                result |= ord(x) ^ ord(y)
         
-        valid_signature = result == 0
+            valid_signature = result == 0
+
+            print client_signature
+            print request_signature
+            print client_signature == request_signature
         # We delay checking validity until the very end, using dummy values for
         # calculations and fetching secrets/keys to ensure the flow of every
         # request remains almost identical regardless of whether valid values
         # have been supplied. This ensures near constant time execution and 
         # prevents malicious users from guessing sensitive information.
+
+        print (valid_client, valid_resource_owner, valid_realm, 
+                    valid_verifier, valid_signature)
         return all((valid_client, valid_resource_owner, valid_realm, 
                     valid_verifier, valid_signature))

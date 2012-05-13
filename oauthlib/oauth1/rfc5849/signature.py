@@ -458,11 +458,16 @@ def sign_rsa_sha1(base_string, rsa_private_key):
     """
 
     # TODO: finish RSA documentation
-
-    import rsa
-    key = rsa.PrivateKey.load_pkcs1(rsa_private_key)
-    sig = rsa.sign(base_string, key, 'SHA-1')
-    return binascii.b2a_base64(sig)[:-1].decode('utf-8')
+    from Crypto.PublicKey import RSA
+    from Crypto.Signature import PKCS1_v1_5
+    from Crypto.Hash import SHA
+    key = RSA.importKey(rsa_private_key)
+    h = SHA.new(base_string)  
+    p = PKCS1_v1_5.new(key)
+    sig = binascii.b2a_base64(p.sign(h))[:-1].decode('utf-8')
+    print "0a", p.sign(h)
+    print "0b", h.hexdigest()
+    return sig
 
 
 def sign_plaintext(client_secret, resource_owner_secret):
@@ -499,3 +504,32 @@ def sign_plaintext(client_secret, resource_owner_secret):
 
     return signature
 
+def verify_rsa(request, rsa_public_key):
+    """Verify a RSASSA-PKCS #1 v1.5 base64 encoded signature.
+
+    Per `section 3.4.3`_ of the spec.
+
+    Note this method requires the PyCrypto library.
+
+    :param method: The HTTP request method.
+    :param uri: The request URI (may contain query parameters).
+    :param params: OAuth parameters and data (i.e. POST data).
+    :param public_rsa: Public RSA key (string).
+    :return: True or False.
+
+    .. _`section 3.4.3`: http://tools.ietf.org/html/rfc5849#section-3.4.3
+
+    """
+    from Crypto.PublicKey import RSA
+    from Crypto.Signature import PKCS1_v1_5
+    from Crypto.Hash import SHA
+    key = RSA.importKey(rsa_public_key)
+    norm_params = normalize_parameters(request.params)
+    uri = normalize_base_string_uri(request.uri)
+    message = construct_base_string(request.http_method, uri, norm_params)
+    h = SHA.new(message)
+    p = PKCS1_v1_5.new(key)
+    sig = binascii.a2b_base64(request.signature)
+    print "1a", sig
+    print "1b", h.hexdigest()
+    return p.verify(h, sig)

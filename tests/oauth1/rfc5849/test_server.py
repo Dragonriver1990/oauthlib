@@ -13,8 +13,10 @@ class ServerTests(TestCase):
     RESOURCE_OWNER_KEY = u'kkk9d7dh3k39sjv7'
     RESOURCE_OWNER_SECRET = u'just-a-string    asdasd'
 
-    RSA_KEY = u"-----BEGIN RSA PRIVATE KEY-----\nMIICXgIBAAKBgQDk1/bxyS8Q8jiheHeYYp/4rEKJopeQRRKKpZI4s5i+UPwVpupG\nAlwXWfzXwSMaKPAoKJNdu7tqKRniqst5uoHXw98gj0x7zamu0Ck1LtQ4c7pFMVah\n5IYGhBi2E9ycNS329W27nJPWNCbESTu7snVlG8V8mfvGGg3xNjTMO7IdrwIDAQAB\nAoGBAOQ2KuH8S5+OrsL4K+wfjoCi6MfxCUyqVU9GxocdM1m30WyWRFMEz2nKJ8fR\np3vTD4w8yplTOhcoXdQZl0kRoaDzrcYkm2VvJtQRrX7dKFT8dR8D/Tr7dNQLOXfC\nDY6xveQczE7qt7Vk7lp4FqmxBsaaEuokt78pOOjywZoInjZhAkEA9wz3zoZNT0/i\nrf6qv2qTIeieUB035N3dyw6f1BGSWYaXSuerDCD/J1qZbAPKKhyHZbVawFt3UMhe\n542UftBaxQJBAO0iJy1I8GQjGnS7B3yvyH3CcLYGy296+XO/2xKp/d/ty1OIeovx\nC60pLNwuFNF3z9d2GVQAdoQ89hUkOtjZLeMCQQD0JO6oPHUeUjYT+T7ImAv7UKVT\nSuy30sKjLzqoGw1kR+wv7C5PeDRvscs4wa4CW9s6mjSrMDkDrmCLuJDtmf55AkEA\nkmaMg2PNrjUR51F0zOEFycaaqXbGcFwe1/xx9zLmHzMDXd4bsnwt9kk+fe0hQzVS\nJzatanQit3+feev1PN3QewJAWv4RZeavEUhKv+kLe95Yd0su7lTLVduVgh4v5yLT\nGa6FHdjGPcfajt+nrpB1n8UQBEH9ZxniokR/IPvdMlxqXA==\n-----END RSA PRIVATE KEY-----"
+    RSA_KEY = u"-----BEGIN PRIVATE KEY-----\n MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAMOZ519ZczgJiUPI\n J9Oac424LUvJw+HXqB2PqwFxdrcar+FDJihQbuHxGhz7bhhHADPG9KhNH45V5sDI\n /g4USqdd9wys8lAqxQAA9AxV2vXX+HK+id+WOZUfBM78OnzeOdvUzyxgmRean+ps\n A/U+PwsiToeGp0ywFkBCF7VJvd8pAgMBAAECgYBuQDWWHQlAsL9aIVuxfgFcBFAj\n w9pRVglAgFZXPek4VCaGxh6f4pZdbFTXuTDZJkwK4z3MD4yV4f1q9N+ed/mLVsZv\n XJb22jQmnNKhiz/thDWz9f97z+TTSocC85H0zdsUrmRKlxIR6+ys9hpBPe2HSKbJ\n zEcW1IKDkM0acJYm8QJBAP12rHp00IrIdrUsm9rO6dinLZpbGeVu2LFPM0Me7nYO\n Kc/GqrLHTSnm91BDbj9IgFrk45mEcSCCOUYutoKgPy8CQQDFjv9ZHd3BkCSbojG1\n RyRVyJQXfZHGMBabta5jjjTJlO7bMjELSfPsnZxoILjyf06qX/LoqsAXrV0Imf8n\n d/EnAkAcZSUheuC6C4cw+NRlCPUtrlzvg/E8wNRJ2OOXS2nPk/qfKlSJPsaoQRXH\n yiYZtNecVzQgSLQbvjsIX8dWjvlFAkAEuHwFhx8rZuRZC7EgYcjOe/J99TQshi2k\n Ht1B573/Kx3iAvsFCAlaGBIKsu14be5VR+GoCZx5dF0KvZNJQCZ1AkEAuYIpaPLf\n xyvKM8kDJ3uyJ2OHiuVlhMNe8g9GX3hHU4UWx3QdnaVm92mx84iuwRdaB1k6Yhk/\n 9jQrjQ0RmlMjpw==\n -----END PRIVATE KEY-----"
   
+    PUB_RSA_KEY = u"-----BEGIN PUBLIC KEY-----\nMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDDmedfWXM4CYlDyCfTmnONuC1L\nycPh16gdj6sBcXa3Gq/hQyYoUG7h8Roc+24YRwAzxvSoTR+OVebAyP4OFEqnXfcM\nrPJQKsUAAPQMVdr11/hyvonfljmVHwTO/Dp83jnb1M8sYJkXmp/qbAP1Pj8LIk6H\nhqdMsBZAQhe1Sb3fKQIDAQAB\n-----END PUBLIC KEY-----"
+
     class TestServer(Server):
 
         @property
@@ -32,11 +34,11 @@ class ServerTests(TestCase):
         def get_client_secret(self, client_key):
             return ServerTests.CLIENT_SECRET
 
-        def get_resource_owner_secret(self, resource_owner_key):
+        def get_resource_owner_secret(self, client_key, resource_owner_key):
             return ServerTests.RESOURCE_OWNER_SECRET
 
         def get_rsa_key(self, client_key):
-            return ServerTests.RSA_KEY
+            return ServerTests.PUB_RSA_KEY
 
         def validate_client_key(self, client_key):
             return ServerTests.CLIENT_KEY == client_key
@@ -89,6 +91,21 @@ class ServerTests(TestCase):
         s = self.TestServer()
         self.assertTrue(s.verify_request(uri, body=body, headers=headers))
 
+    def test_not_implemented(self):
+        s = Server()
+        self.assertRaises(NotImplementedError, s.get_client_secret, None)
+        self.assertRaises(NotImplementedError, s.get_resource_owner_secret, None, None)
+        self.assertRaises(NotImplementedError, lambda: s.dummy_client)
+        self.assertRaises(NotImplementedError, lambda: s.dummy_resource_owner)
+        self.assertRaises(NotImplementedError, s.get_rsa_key, None)
+        self.assertRaises(NotImplementedError, s.validate_client_key, None)
+        self.assertRaises(NotImplementedError, s.validate_resource_owner_key, None, None)
+        self.assertRaises(NotImplementedError, s.validate_timestamp_and_nonce,
+            None, None, None, None)
+        self.assertRaises(NotImplementedError, s.validate_redirect_uri, None, None)
+        self.assertRaises(NotImplementedError, s.validate_realm, None, None, None, None)
+        self.assertRaises(NotImplementedError, s.validate_verifier, None, None, None)
+
     def test_enforce_ssl(self):
         """Ensure SSL is enforced by default."""
         s = Server()
@@ -124,6 +141,7 @@ class ServerTests(TestCase):
     def test_mandated_params(self):
         """Ensure all mandatory params are present."""
         s = Server()
+        self.assertRaises(ValueError, s.verify_request, u'https://a.b/')
         self.assertRaises(ValueError, s.verify_request, u'https://a.b/',
              body=(u'oauth_signature=a&oauth_consumer_key=b&oauth_nonce'))
           
@@ -132,8 +150,9 @@ class ServerTests(TestCase):
         s = Server()
         self.assertRaises(ValueError, s.verify_request, u'https://a.b/',
              body=(u'oauth_signature=a&oauth_consumer_key=b&oauth_nonce=c&'
-                   u'oauth_timestamp=1234567890&oauth_signature_method=RSA-SHA1&'
+                   u'oauth_timestamp=a&oauth_signature_method=RSA-SHA1&'
                    u'oauth_version=2.0')) 
+
 
     def test_oauth_timestamp(self):
         """Check for a valid UNIX timestamp."""
@@ -208,6 +227,7 @@ class ServerTests(TestCase):
 
         client=(u'oauth_signature=a&oauth_timestamp=%s&oauth_nonce=c&'
               u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=abcdefghijklmnopqrstuvxyz&'
               u'oauth_consumer_key=%s')
     
         owner=(u'oauth_signature=a&oauth_timestamp=%s&'
@@ -218,49 +238,157 @@ class ServerTests(TestCase):
 
         nonce=(u'oauth_signature=a&oauth_timestamp=%s&oauth_nonce=%s&'
               u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=abcdefghijklmnopqrstuvxyz&'
               u'oauth_consumer_key=abcdefghijklmnopqrstuvwxyz')
 
         realm=(u'oauth_signature=a&oauth_timestamp=%s&'
               u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
               u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
               u'oauth_consumer_key=abcdefghijklmnopqrstuvxyz&'
+              u'oauth_token=abcdefghijklmnopqrstuvxyz&'
               u'realm=%s')
 
         verifier=(u'oauth_signature=a&oauth_timestamp=%s&'
               u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
               u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
               u'oauth_consumer_key=abcdefghijklmnopqrstuvxyz&'
+              u'oauth_token=abcdefghijklmnopqrstuvxyz&'
               u'oauth_verifier=%s')
 
         uri = u'https://example.com/'
         s = Server()
 
         # Invalid characters
-        invalid = (ts, u'åbcdefghijklmnopqrstuvwxyz')
+        invalid = (ts, u'%C3%A5abcdefghijklmnopqrstuvwxyz')
         self.assertRaises(ValueError, s.verify_request, uri, body=client % invalid)
         self.assertRaises(ValueError, s.verify_request, uri, body=owner % invalid)
         self.assertRaises(ValueError, s.verify_request, uri, body=nonce % invalid)
-        self.assertRaises(ValueError, s.verify_request, uri, body=verifier % invalid)
+        self.assertRaises(ValueError, s.verify_request, uri, body=verifier % invalid,
+            require_verifier=True)
 
         # Too short
         short = (ts, u'abcdefghi')
         self.assertRaises(ValueError, s.verify_request, uri, body=client % short)
         self.assertRaises(ValueError, s.verify_request, uri, body=owner % short)
         self.assertRaises(ValueError, s.verify_request, uri, body=nonce % short)
-        self.assertRaises(ValueError, s.verify_request, uri, body=verifier % short)
+        self.assertRaises(ValueError, s.verify_request, uri, body=verifier % short,
+            require_verifier=True)
 
         # Too long
         loong = (ts, u'abcdefghijklmnopqrstuvwxyz123456789')
         self.assertRaises(ValueError, s.verify_request, uri, body=client % loong) 
         self.assertRaises(ValueError, s.verify_request, uri, body=owner % loong) 
         self.assertRaises(ValueError, s.verify_request, uri, body=nonce % loong) 
-        self.assertRaises(ValueError, s.verify_request, uri, body=verifier % loong) 
+        self.assertRaises(ValueError, s.verify_request, uri, body=verifier % loong,
+            require_verifier=True) 
 
         # By default no realms are allowed
         test = (ts, u'shibboleth')
-        self.assertRaises(ValueError, s.verify_request, uri, body=realm % test)
+        self.assertRaises(ValueError, s.verify_request, uri, body=realm % test,
+            require_realm=True)
 
+        # Missing required owner
+        self.assertRaises(ValueError, s.verify_request, uri, body=owner % (ts, u'')) 
 
+        # Missing required verifier
+        self.assertRaises(ValueError, s.verify_request, uri, body=realm % test,
+            require_verifier=True)
+
+        # Missing required realm
+        self.assertRaises(ValueError, s.verify_request, uri, body=verifier % test,
+            require_realm=True)
+
+    def test_validation(self):
+
+        class ClientServer(Server):
+            clients = [u'foo']
+            nonces = [(u'foo', u'once', u'1234567891', u'fez')]
+            owners = { u'foo' : [u'abcdefghijklmnopqrstuvxyz', u'fez'] }
+
+            @property
+            def client_key_length(self):
+                return 1, 30
+
+            @property
+            def resource_owner_key_length(self):
+                return 1, 30
+
+            @property
+            def nonce_length(self):
+                return 2, 30
+
+            @property
+            def timestamp_lifetime(self):
+                # Disabled check to allow hardcoded verification signatures
+                return 1000000000
+
+            @property
+            def dummy_client(self):
+                return u'dummy'
+
+            @property
+            def dummy_resource_owner(self):
+                return u'dumbo'
+
+            def validate_timestamp_and_nonce(self, client_key, timestamp, 
+                nonce, resource_owner_key=None):
+                return not (client_key, nonce, timestamp, resource_owner_key) in self.nonces                
+
+            def validate_client_key(self, client_key):
+                return client_key in self.clients
+
+            def validate_resource_owner_key(self, client_key, resource_owner_key):
+                return (self.owners.get(client_key) and 
+                        resource_owner_key in self.owners.get(client_key))
+
+            def validate_realm(self, client_key, resource_owner_key, realm, uri):
+                return True
+
+            def get_client_secret(self, client_key):
+                return u'super secret'
+
+            def get_resource_owner_secret(self, client_key, resource_owner_key):
+                return u'even more secret'
+
+        s = ClientServer()
+
+        client = (u'oauth_signature=fmrXnTF4lO4o%2BD0%2FlZaJHP%2FXqEY%3D&'
+              u'oauth_timestamp=1234567890&'
+              u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
+              u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=abcdefghijklmnopqrstuvxyz&'
+              u'oauth_consumer_key={}')
+
+        replay = (u'oauth_signature=fmrXnTF4lO4o%2BD0%2FlZaJHP%2FXqEY%3D&'
+              u'oauth_timestamp=1234567891&'
+              u'oauth_nonce=once&'
+              u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=fez&'
+              u'oauth_consumer_key=foo')
+
+        no_owner = (u'oauth_signature=Caupx4p518D7HzA6ihWwV4kB93A%3D&'
+              u'oauth_timestamp=1234567890&'
+              u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
+              u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_consumer_key=foo')
+
+        invalid_owner = (u'oauth_signature=B0FUgxzDNOPzol0gTTlXREelYrU%3D&'
+              u'oauth_timestamp=1234567890&'
+              u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
+              u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=invalid&'
+              u'oauth_consumer_key=foo')
+
+        uri = u'https://example.com/'
+
+        # Test client validation
+        self.assertFalse(s.verify_request(uri, body=replay))
+        self.assertFalse(s.verify_request(uri, body=client.format(u'bar')))
+        self.assertTrue(s.verify_request(uri, body=client.format(u'foo')))
+        self.assertTrue(s.verify_request(uri, body=no_owner,
+            require_resource_owner=False))
+        self.assertFalse(s.verify_request(uri, body=invalid_owner))
+    
     def test_timing_attack(self):
         """Ensure near constant time verification."""
         #TODO:
