@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 import time
+from oauthlib.common import safe_compare
 from oauthlib.oauth1.rfc5849 import *
 from ...unittest import TestCase
 
@@ -56,6 +57,72 @@ class ServerTests(TestCase):
 
         def validate_verifier(self, client_key, resource_owner_key, verifier):
             return True
+
+    class ClientServer(Server):
+        clients = [u'foo']
+        nonces = [(u'foo', u'once', u'1234567891', u'fez')]
+        owners = { u'foo' : [u'abcdefghijklmnopqrstuvxyz', u'fez'] }
+        assigned_realms = { (u'foo', u'fez') : u'photos' }
+        verifiers = { (u'foo', u'fez') : u'shibboleth' }
+
+        @property
+        def client_key_length(self):
+            return 1, 30
+
+        @property
+        def resource_owner_key_length(self):
+            return 1, 30
+
+        @property
+        def nonce_length(self):
+            return 2, 30
+
+        @property
+        def verifier_length(self):
+            return 2, 30
+
+        @property
+        def realms(self):
+            return [u'photos']
+
+        @property
+        def timestamp_lifetime(self):
+            # Disabled check to allow hardcoded verification signatures
+            return 1000000000
+
+        @property
+        def dummy_client(self):
+            return u'dummy'
+
+        @property
+        def dummy_resource_owner(self):
+            return u'dumbo'
+
+        def validate_timestamp_and_nonce(self, client_key, timestamp, 
+            nonce, resource_owner_key=None):
+            return not (client_key, nonce, timestamp, resource_owner_key) in self.nonces                
+
+        def validate_client_key(self, client_key):
+            return client_key in self.clients
+
+        def validate_resource_owner_key(self, client_key, resource_owner_key):
+            return (self.owners.get(client_key) and 
+                    resource_owner_key in self.owners.get(client_key))
+
+        def validate_realm(self, client_key, resource_owner_key, realm, uri):
+            return ((client_key, resource_owner_key) in self.assigned_realms and
+                     realm in self.assigned_realms.get((client_key, resource_owner_key)))
+
+        def validate_verifier(self, client_key, resource_owner_key, verifier):
+            return ((client_key, resource_owner_key) in self.verifiers and
+                     safe_compare(verifier, self.verifiers.get(
+                        (client_key, resource_owner_key))))
+
+        def get_client_secret(self, client_key):
+            return u'super secret'
+
+        def get_resource_owner_secret(self, client_key, resource_owner_key):
+            return u'even more secret'
 
     def test_basic_server_request(self):
         c = Client(self.CLIENT_KEY,
@@ -152,7 +219,6 @@ class ServerTests(TestCase):
              body=(u'oauth_signature=a&oauth_consumer_key=b&oauth_nonce=c&'
                    u'oauth_timestamp=a&oauth_signature_method=RSA-SHA1&'
                    u'oauth_version=2.0')) 
-
 
     def test_oauth_timestamp(self):
         """Check for a valid UNIX timestamp."""
@@ -298,66 +364,8 @@ class ServerTests(TestCase):
         self.assertRaises(ValueError, s.verify_request, uri, body=verifier % test,
             require_realm=True)
 
-    def test_validation(self):
-
-        class ClientServer(Server):
-            clients = [u'foo']
-            nonces = [(u'foo', u'once', u'1234567891', u'fez')]
-            owners = { u'foo' : [u'abcdefghijklmnopqrstuvxyz', u'fez'] }
-            assigned_realms = { (u'foo', u'fez') : u'photos' }
-
-            @property
-            def client_key_length(self):
-                return 1, 30
-
-            @property
-            def resource_owner_key_length(self):
-                return 1, 30
-
-            @property
-            def nonce_length(self):
-                return 2, 30
-
-            @property
-            def realms(self):
-                return [u'photos']
-
-            @property
-            def timestamp_lifetime(self):
-                # Disabled check to allow hardcoded verification signatures
-                return 1000000000
-
-            @property
-            def dummy_client(self):
-                return u'dummy'
-
-            @property
-            def dummy_resource_owner(self):
-                return u'dumbo'
-
-            def validate_timestamp_and_nonce(self, client_key, timestamp, 
-                nonce, resource_owner_key=None):
-                return not (client_key, nonce, timestamp, resource_owner_key) in self.nonces                
-
-            def validate_client_key(self, client_key):
-                return client_key in self.clients
-
-            def validate_resource_owner_key(self, client_key, resource_owner_key):
-                return (self.owners.get(client_key) and 
-                        resource_owner_key in self.owners.get(client_key))
-
-            def validate_realm(self, client_key, resource_owner_key, realm, uri):
-                return ((client_key, resource_owner_key) in self.assigned_realms and
-                         realm in self.assigned_realms.get((client_key, resource_owner_key)))
-
-            def get_client_secret(self, client_key):
-                return u'super secret'
-
-            def get_resource_owner_secret(self, client_key, resource_owner_key):
-                return u'even more secret'
-
-        s = ClientServer()
-
+    def test_client_validation(self):
+        uri = u'https://example.com/'
         client = (u'oauth_signature=fmrXnTF4lO4o%2BD0%2FlZaJHP%2FXqEY%3D&'
               u'oauth_timestamp=1234567890&'
               u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
@@ -365,6 +373,12 @@ class ServerTests(TestCase):
               u'oauth_token=abcdefghijklmnopqrstuvxyz&'
               u'oauth_consumer_key={}')
 
+        s = self.ClientServer()
+        self.assertFalse(s.verify_request(uri, body=client.format(u'bar')))
+        self.assertTrue(s.verify_request(uri, body=client.format(u'foo')))
+
+    def test_nonce_and_timestamp_validation(self):
+        uri = u'https://example.com/'
         replay = (u'oauth_signature=fmrXnTF4lO4o%2BD0%2FlZaJHP%2FXqEY%3D&'
               u'oauth_timestamp=1234567891&'
               u'oauth_nonce=once&'
@@ -372,6 +386,11 @@ class ServerTests(TestCase):
               u'oauth_token=fez&'
               u'oauth_consumer_key=foo')
 
+        s = self.ClientServer()
+        self.assertFalse(s.verify_request(uri, body=replay))
+
+    def test_resource_owner_validation(self):
+        uri = u'https://example.com/'
         no_owner = (u'oauth_signature=Caupx4p518D7HzA6ihWwV4kB93A%3D&'
               u'oauth_timestamp=1234567890&'
               u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
@@ -385,6 +404,13 @@ class ServerTests(TestCase):
               u'oauth_token=invalid&'
               u'oauth_consumer_key=foo')
 
+        s = self.ClientServer()
+        self.assertTrue(s.verify_request(uri, body=no_owner,
+            require_resource_owner=False))
+        self.assertFalse(s.verify_request(uri, body=invalid_owner))
+
+    def test_signature_verification(self):
+        uri = u'https://example.com/'
         short_sig = (u'oauth_signature=fmrXnTF4lO4o%2BD0%2FlZaJHP%2FXqEY&'
               u'oauth_timestamp=1234567890&'
               u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
@@ -399,6 +425,12 @@ class ServerTests(TestCase):
               u'oauth_token=abcdefghijklmnopqrstuvxyz&'
               u'oauth_consumer_key=foo')
 
+        s = self.ClientServer()
+        self.assertFalse(s.verify_request(uri, body=short_sig))
+        self.assertFalse(s.verify_request(uri, body=plain))
+
+    def test_realm_validation(self):
+        uri = u'https://example.com/'
         realm = (u'oauth_signature=qra7%2Bl70DVl34ezNbsBnoPnbrss%3D&'
               u'oauth_timestamp=1234567890&'
               u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
@@ -406,30 +438,22 @@ class ServerTests(TestCase):
               u'oauth_token=fez&'
               u'oauth_consumer_key=foo&realm=photos')
 
-
-        uri = u'https://example.com/'
-
-        # Test for used nonce + timestamp
-        self.assertFalse(s.verify_request(uri, body=replay))
-
-        # Test client validation
-        self.assertFalse(s.verify_request(uri, body=client.format(u'bar')))
-        self.assertTrue(s.verify_request(uri, body=client.format(u'foo')))
-        self.assertTrue(s.verify_request(uri, body=no_owner,
-            require_resource_owner=False))
-
-        # Test resource owner validation
-        self.assertFalse(s.verify_request(uri, body=invalid_owner))
-
-        # Test verifier validation
-
-        # Test realm validation
+        s = self.ClientServer()
         self.assertTrue(s.verify_request(uri, body=realm,
             require_realm=True))
 
-        # Test signature verification
-        self.assertFalse(s.verify_request(uri, body=short_sig))
-        self.assertFalse(s.verify_request(uri, body=plain))
+    def test_verifier_validation(self):    
+        uri = u'https://example.com/'
+        verifier = (u'oauth_signature=6AsWnRg%2BZnvfJOZKgaC5JKrF3Pk%3D&'
+              u'oauth_timestamp=1234567890&'
+              u'oauth_nonce=abcdefghijklmnopqrstuvwxyz&'
+              u'oauth_version=1.0&oauth_signature_method=HMAC-SHA1&'
+              u'oauth_token=fez&oauth_consumer_key=foo&'
+              u'oauth_verifier=shibboleth')
+
+        s = self.ClientServer()
+        self.assertTrue(s.verify_request(uri, body=verifier,
+            require_verifier=True))
     
     def test_timing_attack(self):
         """Ensure near constant time verification."""

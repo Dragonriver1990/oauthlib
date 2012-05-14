@@ -625,7 +625,7 @@ class Server(object):
         # Servers receiving an authenticated request MUST validate it by:
         #   If the "oauth_version" parameter is present, ensuring its value is
         #   "1.0".
-        if u'oauth_version' in params and params[u'oauth_version'] != u'1.0':
+        if u'oauth_version' in oauth_params and oauth_params[u'oauth_version'] != u'1.0':
             raise ValueError("Invalid OAuth version.")
 
         # The timestamp value MUST be a positive integer. Unless otherwise
@@ -751,13 +751,14 @@ class Server(object):
         # for each request. Note that HMAC-SHA1 and PLAINTEXT share parameters
 
         request.params = filter(lambda x: x[0] != "oauth_signature", params)
+        request.signature = request_signature
+
         # ---- RSA Signature verification ----
         if signature_method == SIGNATURE_RSA:
             # The server verifies the signature per `[RFC3447] section 8.2.2`_
             # .. _`[RFC3447] section 8.2.2`: http://tools.ietf.org/html/rfc3447#section-8.2.1
             rsa_key = self.get_rsa_key(client_key)
-            request.signature = request_signature
-            valid_signature = signature.verify_rsa(request, rsa_key)
+            valid_signature = signature.verify_rsa_sha1(request, rsa_key)
 
         # ---- HMAC or Plaintext Signature verification ----
         else:
@@ -771,27 +772,11 @@ class Server(object):
                 client_key, resource_owner_key)
 
             if signature_method == SIGNATURE_HMAC:
-                norm_params = signature.normalize_parameters(request.params)
-                uri = signature.normalize_base_string_uri(request.uri)
-                base_string = signature.construct_base_string(request.http_method,
-                    uri, norm_params)
-
-                client_signature = signature.sign_hmac_sha1(base_string, 
+                valid_signature = signature.verify_hmac_sha1(request,
                     client_secret, resource_owner_secret)
             else:
-                client_signature = signature.sign_plaintext(client_secret,
-                    resource_owner_secret)
-
-            # `Constant time string comparision`_ to avoid timing attacks
-            # .. _`Constant time string comparison`: http://rdist.root.org/2010/01/07/timing-independent-array-comparison/
-            if len(client_signature) != len(request_signature):
-                return False
-
-            result = 0
-            for x, y in zip(client_signature, request_signature):
-                result |= ord(x) ^ ord(y)
-        
-            valid_signature = result == 0
+                valid_signature = signature.verify_plaintext(request,
+                    client_secret, resource_owner_secret)
 
         # We delay checking validity until the very end, using dummy values for
         # calculations and fetching secrets/keys to ensure the flow of every
